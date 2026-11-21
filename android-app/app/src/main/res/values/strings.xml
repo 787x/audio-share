@@ -57,4 +57,5 @@
     <string name="output_original">Original AudioTrack</string>
     <string name="output_track_pcm24">AudioTrack PCM24</string>
     <string name="output_aaudio">AAudio EXCLUSIVE request</string>
+    <string name="output_track_pcm24_a2dp">AudioTrack PCM24 (prefer A2DP)</string>
 </resources>

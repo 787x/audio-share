@@ -85,7 +85,7 @@ internal class PlaybackOutput(private val context: Context) {
                 return
             }
         }
-        openTrack(mode == OutputMode.TRACK_PCM24)
+        openTrack(pcm24 = mode != OutputMode.ORIGINAL)
     }
 
     @RequiresApi(31)
@@ -136,11 +136,8 @@ internal class PlaybackOutput(private val context: Context) {
             .setSampleRate(input.sampleRate)
             .build()
         Log.i(OUTPUT_LOG, "event=api_request mode=$active rate=${input.sampleRate} " +
-            "format=${encodingName(encoding)} channels=${input.channels} route=system_default")
-        if (pcm24 && Build.VERSION.SDK_INT >= 33) {
-            Log.i(OUTPUT_LOG, "event=direct_capability mode=$active " +
-                "flags=${AudioManager.getDirectPlaybackSupport(format, attributes)}")
-        }
+            "format=${encodingName(encoding)} channels=${input.channels} route=${if (active == OutputMode.TRACK_PCM24_PREFER_A2DP) "prefer_a2dp" else "system_default"}")
+
         val minimum = AudioTrack.getMinBufferSize(input.sampleRate, mask, encoding)
         check(minimum > 0) { "AudioTrack.getMinBufferSize returned $minimum" }
         val output = AudioTrack.Builder()
@@ -163,8 +160,27 @@ internal class PlaybackOutput(private val context: Context) {
             effect.setTargetGain(loudness)
             effect.enabled = true
         }
+        if (active == OutputMode.TRACK_PCM24_PREFER_A2DP) preferA2dp(output)
         output.play()
         reportRoute()
+    }
+
+    private fun preferA2dp(output: AudioTrack) {
+        val candidates = manager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+            .filter { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP }
+        val candidate = candidates.singleOrNull()
+        if (candidate == null) {
+            Log.w(OUTPUT_LOG, "event=preferred_device mode=$active session=${output.audioSessionId} " +
+                "result=skipped reason=${if (candidates.isEmpty()) "no_a2dp" else "ambiguous_a2dp"} " +
+                "candidates=${candidates.map { it.id }} route=system_default")
+            return
+        }
+
+        requestedDeviceId = candidate.id
+        val accepted = output.setPreferredDevice(candidate)
+        Log.i(OUTPUT_LOG, "event=preferred_device mode=$active session=${output.audioSessionId} " +
+            "requestedDeviceId=$requestedDeviceId accepted=$accepted " +
+            "preferredDeviceId=${output.preferredDevice?.id}")
     }
 
     suspend fun write(inputData: ByteBuffer) {
@@ -217,8 +233,8 @@ internal class PlaybackOutput(private val context: Context) {
         nextRouteCheck = SystemClock.elapsedRealtime() + 1000
         val deviceId = if (stream != 0L) AAudioNative.deviceId(stream) else track?.routedDevice?.id ?: 0
         val device = manager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).firstOrNull { it.id == deviceId }
-        val route = "deviceId=$deviceId type=${device?.type} name=${device?.productName} " +
-            "bluetooth=${device?.isBluetoothMedia()} preferredDeviceId=$requestedDeviceId"
+        val route = "deviceId=$deviceId type=${device?.type} " +
+            "bluetooth=${device?.isBluetoothMedia()} requestedDeviceId=$requestedDeviceId"
         if (lastRoute == route) return
         lastRoute = route
         val result = when {
@@ -227,7 +243,11 @@ internal class PlaybackOutput(private val context: Context) {
             requestedDeviceId != 0 && deviceId != requestedDeviceId -> "different_bluetooth_device"
             else -> "bluetooth"
         }
-        Log.i(OUTPUT_LOG, "event=api_route mode=$active result=$result $route")
+        Log.i(OUTPUT_LOG, "event=api_route mode=$active result=$result session=${track?.audioSessionId} $route")
+        val output = track
+        if (Build.VERSION.SDK_INT >= 31 && output != null && active != OutputMode.ORIGINAL) {
+            logDirectPlaybackCapabilities(manager, output.audioAttributes, device, active.name, output.audioSessionId)
+        }
     }
 
     fun close() {
@@ -257,7 +277,7 @@ private fun AudioDeviceInfo.isBluetoothMedia() =
         type == AudioDeviceInfo.TYPE_BLE_BROADCAST ||
         type == AudioDeviceInfo.TYPE_HEARING_AID
 
-private fun encodingName(encoding: Int) = when (encoding) {
+internal fun encodingName(encoding: Int) = when (encoding) {
     AudioFormat.ENCODING_PCM_FLOAT -> "FLOAT32"
     AudioFormat.ENCODING_PCM_24BIT_PACKED -> "PCM24_PACKED"
     else -> encoding.toString()

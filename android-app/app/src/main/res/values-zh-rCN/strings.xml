@@ -57,4 +57,5 @@
     <string name="output_original">原始 AudioTrack</string>
     <string name="output_track_pcm24">AudioTrack PCM24</string>
     <string name="output_aaudio">AAudio（请求 EXCLUSIVE）</string>
+    <string name="output_track_pcm24_a2dp">AudioTrack PCM24（首选 A2DP）</string>
 </resources>
