@@ -17,18 +17,12 @@
 package io.github.mkckr0.audio_share_app.service
 
 import android.content.Context
-import android.media.AudioAttributes
-import android.media.AudioFormat
-import android.media.AudioTrack
-import android.media.audiofx.LoudnessEnhancer
-import android.os.Build
 import android.os.Looper
 import android.util.Log
 import androidx.annotation.OptIn
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.media3.common.MediaItem
@@ -40,15 +34,11 @@ import androidx.media3.common.util.UnstableApi
 import com.google.common.util.concurrent.Futures.immediateVoidFuture
 import com.google.common.util.concurrent.ListenableFuture
 import io.github.mkckr0.audio_share_app.R
-import io.github.mkckr0.audio_share_app.model.AudioConfigKeys
 import io.github.mkckr0.audio_share_app.model.NetworkConfigKeys
-import io.github.mkckr0.audio_share_app.model.audioConfigDataStore
-import io.github.mkckr0.audio_share_app.model.getFloat
 import io.github.mkckr0.audio_share_app.model.getInteger
 import io.github.mkckr0.audio_share_app.model.getResourceUri
 import io.github.mkckr0.audio_share_app.model.networkConfigDataStore
 import io.github.mkckr0.audio_share_app.pb.Client
-import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
@@ -57,7 +47,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.plus
 import java.nio.ByteBuffer
 import kotlin.time.Duration.Companion.seconds
 
@@ -82,16 +71,9 @@ class AudioPlayer(val context: Context) : SimpleBasePlayer(Looper.getMainLooper(
     private var _state: State = _initState
     override fun getState(): State = _state
 
-    private val netClient = NetClient(context.applicationContext)
-
-    private var _audioTrack: AudioTrack? = null
-    private val audioTrack get() = _audioTrack!!
-
-    private var _loudnessEnhancer: LoudnessEnhancer? = null
-    private val loudnessEnhancer get() = _loudnessEnhancer!!
-
     private val scope: CoroutineScope = MainScope()
     private val retryScope: CoroutineScope = MainScope()
+    private val netClient = NetClient(context.applicationContext, scope)
 
     companion object {
         var message by mutableStateOf("")
@@ -164,16 +146,6 @@ class AudioPlayer(val context: Context) : SimpleBasePlayer(Looper.getMainLooper(
         scope.cancel()
         netClient.stop()
         retryScope.cancel()
-        _loudnessEnhancer?.run {
-            release()
-        }
-        _loudnessEnhancer = null
-        _audioTrack?.run {
-            pause()
-            flush()
-            release()
-        }
-        _audioTrack = null
         _state = State.Builder().build()
         return immediateVoidFuture()
     }
@@ -181,102 +153,21 @@ class AudioPlayer(val context: Context) : SimpleBasePlayer(Looper.getMainLooper(
     inner class NetClientCallBack : NetClient.Callback {
         private val tag = NetClientCallBack::class.simpleName
 
-        override val scope: CoroutineScope = MainScope() + CoroutineName("NetClientCallbackScope")
+        private val output = PlaybackOutput(context.applicationContext)
 
-        override suspend fun log(message: String) {
-//            Log.d(tag, "logMessage: $message")
+        override fun log(message: String) {
             AudioPlayer.message = message
         }
 
         override suspend fun onReceiveAudioFormat(format: Client.AudioFormat) {
-            val encoding = when (format.encoding) {
-                Client.AudioFormat.Encoding.ENCODING_PCM_FLOAT -> AudioFormat.ENCODING_PCM_FLOAT
-                Client.AudioFormat.Encoding.ENCODING_PCM_8BIT -> AudioFormat.ENCODING_PCM_8BIT
-                Client.AudioFormat.Encoding.ENCODING_PCM_16BIT -> AudioFormat.ENCODING_PCM_16BIT
-                Client.AudioFormat.Encoding.ENCODING_PCM_24BIT -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    AudioFormat.ENCODING_PCM_24BIT_PACKED
-                } else {
-                    AudioFormat.ENCODING_INVALID
-                }
-
-                Client.AudioFormat.Encoding.ENCODING_PCM_32BIT -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    AudioFormat.ENCODING_PCM_32BIT
-                } else {
-                    AudioFormat.ENCODING_INVALID
-                }
-
-                else -> {
-                    AudioFormat.ENCODING_INVALID
-                }
-            }
-
-            val channelMask = when (format.channels) {
-                1 -> AudioFormat.CHANNEL_OUT_MONO
-                2 -> AudioFormat.CHANNEL_OUT_STEREO
-                3 -> AudioFormat.CHANNEL_OUT_STEREO or AudioFormat.CHANNEL_OUT_FRONT_CENTER
-                4 -> AudioFormat.CHANNEL_OUT_QUAD
-                5 -> AudioFormat.CHANNEL_OUT_QUAD or AudioFormat.CHANNEL_OUT_FRONT_CENTER
-                6 -> AudioFormat.CHANNEL_OUT_5POINT1
-                7 -> AudioFormat.CHANNEL_OUT_5POINT1 or AudioFormat.CHANNEL_OUT_BACK_CENTER
-                8 -> AudioFormat.CHANNEL_OUT_7POINT1_SURROUND
-                else -> AudioFormat.CHANNEL_INVALID
-            }
-
-            Log.i(
-                tag,
-                "encoding: $encoding, channelMask: $channelMask, sampleRate: ${format.sampleRate}"
-            )
-
-            val minBufferSize =
-                AudioTrack.getMinBufferSize(format.sampleRate, channelMask, encoding)
-
-            Log.i(tag, "min buffer size: $minBufferSize bytes")
-
-            val audioConfig = context.audioConfigDataStore.data.first()
-
-            val bufferScale =
-                (audioConfig[floatPreferencesKey(AudioConfigKeys.BUFFER_SCALE)] ?: context.getFloat(
-                    R.string.default_buffer_scale
-                )).toInt()
-            Log.i(tag, "buffer scale: $bufferScale")
-
-            _audioTrack = AudioTrack.Builder()
-                .setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_MEDIA)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                        .build()
-                )
-                .setAudioFormat(
-                    AudioFormat.Builder()
-                        .setEncoding(encoding)
-                        .setChannelMask(channelMask)
-                        .setSampleRate(format.sampleRate)
-                        .build()
-                )
-                .setBufferSizeInBytes(minBufferSize * bufferScale)
-                .setTransferMode(AudioTrack.MODE_STREAM)
-                .build()
-
-            val volume = audioConfig[floatPreferencesKey(AudioConfigKeys.VOLUME)]
-                ?: context.getFloat(R.string.default_volume)
-            Log.i(tag, "volume: $volume")
-            audioTrack.setVolume(volume)
-
-            val loudnessEnhancerGain =
-                (audioConfig[floatPreferencesKey(AudioConfigKeys.LOUDNESS_ENHANCER)]
-                    ?: context.getFloat(R.string.default_loudness_enhancer)).toInt()
-            Log.i(tag, "loudness enhancer: ${loudnessEnhancerGain}mB")
-            if (loudnessEnhancerGain > 0) {
-                _loudnessEnhancer = LoudnessEnhancer(audioTrack.audioSessionId)
-                loudnessEnhancer.setTargetGain(loudnessEnhancerGain)
-                loudnessEnhancer.setEnabled(true)
-            }
-
-            audioTrack.play()
+            output.start(format)
         }
 
-        override suspend fun onPlaybackStarted() {
+        override fun onPlaybackClosed() {
+            output.close()
+        }
+
+        override fun onPlaybackStarted() {
             _state = state.buildUpon()
                 .setPlaybackState(STATE_READY)
                 .build()
@@ -286,12 +177,11 @@ class AudioPlayer(val context: Context) : SimpleBasePlayer(Looper.getMainLooper(
         }
 
         override suspend fun onReceiveAudioData(audioData: ByteBuffer) {
-//            Log.d(tag, "${audioData.remaining()}")
-            audioTrack.write(audioData, audioData.remaining(), AudioTrack.WRITE_NON_BLOCKING)
+            output.write(audioData)
         }
 
-        override suspend fun onError(message: String?, cause: Throwable?) {
-            // switch to retryScope to prevent NetClient cancel callback scope
+        override fun onError(message: String?, cause: Throwable?) {
+            // The disconnected session has already released its output.
             retryScope.launch {
 
                 netClient.stop()
