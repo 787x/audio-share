@@ -31,10 +31,22 @@ plugins {
 android {
     namespace = "io.github.mkckr0.audio_share_app"
     compileSdk = 35
+    ndkVersion = "27.0.12077973"
+
+    externalNativeBuild {
+        ndkBuild {
+            path = file("src/main/jni/Android.mk")
+        }
+    }
 
     defaultConfig {
         applicationId = "io.github.mkckr0.audio_share_app"
         minSdk = 23
+        externalNativeBuild {
+            ndkBuild {
+                arguments += "APP_PLATFORM=android-31"
+            }
+        }
         targetSdk = 35
         versionCode = 3004
         versionName = "0.3.4"
@@ -43,7 +55,7 @@ android {
     }
 
     signingConfigs {
-        create("release") {
+        if (rootProject.file("keystore.properties").isFile) create("release") {
             val keystoreProperties = Properties().apply {
                 load(rootProject.file("keystore.properties").inputStream())
             }
@@ -56,13 +68,17 @@ android {
     }
 
     buildTypes {
+        debug {
+            applicationIdSuffix = ".audiolab"
+            versionNameSuffix = "-audiolab"
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             isDebuggable = false
             isProfileable = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs["release"]
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 

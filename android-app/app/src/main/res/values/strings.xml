@@ -52,4 +52,10 @@
     <string name="label_timeout">Connect timeout</string>
     <string name="label_unresolved_address">Unresolved address</string>
     <string name="label_connecting">Connecting</string>
+    <string name="output_mode">Experimental audio output</string>
+    <string name="output_mode_help">Pause and play again to apply. Check AudioOutputLab in logcat for the actual mode, route, or fallback.</string>
+    <string name="output_original">Original AudioTrack</string>
+    <string name="output_track_pcm24">AudioTrack PCM24</string>
+    <string name="output_aaudio">AAudio EXCLUSIVE request</string>
+    <string name="output_track_pcm24_a2dp">AudioTrack PCM24 (prefer A2DP)</string>
 </resources>

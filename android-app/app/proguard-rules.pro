@@ -28,3 +28,6 @@
     public static *** v(...);
     public static *** d(...);
 }
+
+# JNI entry points use the Kotlin class and native method names.
+-keepclasseswithmembernames class io.github.mkckr0.audio_share_app.service.AAudioNative { native <methods>; }

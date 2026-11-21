@@ -20,7 +20,26 @@ import android.media.AudioTrack
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.res.stringResource
+import androidx.datastore.preferences.core.edit
+import io.github.mkckr0.audio_share_app.model.OutputMode
+import io.github.mkckr0.audio_share_app.model.audioConfigDataStore
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
@@ -36,9 +55,10 @@ import io.github.mkckr0.audio_share_app.ui.theme.AppTheme
 fun AudioScreen() {
     val context = LocalContext.current
     Column(
-        modifier = Modifier.padding(16.dp),
+        modifier = Modifier.verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
+        OutputModeConfig()
         ConfigGroup(context.getString(R.string.label_audio_track)) {
             SliderConfig(
                 key = AudioConfigKeys.VOLUME,
@@ -66,6 +86,36 @@ fun AudioScreen() {
                 valueRange = 0f..3000f,
                 step = 100f
             )
+        }
+    }
+}
+
+@Composable
+private fun OutputModeConfig() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val mode by remember(context) {
+        context.audioConfigDataStore.data.map { OutputMode.fromPreference(it[OutputMode.key]) }
+    }.collectAsState(null)
+    var expanded by remember { mutableStateOf(false) }
+    ConfigGroup(stringResource(R.string.output_mode)) {
+        Text(stringResource(R.string.output_mode_help))
+        mode?.let { current ->
+            Box {
+                OutlinedButton(onClick = { expanded = true }) {
+                    Text(stringResource(current.label))
+                }
+                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                    OutputMode.entries.forEach { option ->
+                        DropdownMenuItem(text = { Text(stringResource(option.label)) }, onClick = {
+                            expanded = false
+                            scope.launch {
+                                context.audioConfigDataStore.edit { it[OutputMode.key] = option.name }
+                            }
+                        })
+                    }
+                }
+            }
         }
     }
 }

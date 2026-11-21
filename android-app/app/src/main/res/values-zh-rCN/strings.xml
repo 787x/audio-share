@@ -52,4 +52,10 @@
     <string name="label_timeout">连接超时</string>
     <string name="label_unresolved_address">无法解析的地址</string>
     <string name="label_connecting">正在连接</string>
+    <string name="output_mode">实验音频输出</string>
+    <string name="output_mode_help">暂停后重新播放以应用设置。实际模式、路由和回退结果请查看 logcat 中的 AudioOutputLab。</string>
+    <string name="output_original">原始 AudioTrack</string>
+    <string name="output_track_pcm24">AudioTrack PCM24</string>
+    <string name="output_aaudio">AAudio（请求 EXCLUSIVE）</string>
+    <string name="output_track_pcm24_a2dp">AudioTrack PCM24（首选 A2DP）</string>
 </resources>
